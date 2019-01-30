@@ -12,7 +12,30 @@ import cv2
 from cv_bridge import CvBridge, CvBridgeError
 from sensor_msgs.msg import Image, LaserScan, CameraInfo
 import numpy as np
+from operator import add, sub
+import tf
+from tf.transformations import quaternion_from_euler
 # from matplotlib import pyplot as plt
+
+
+def dist_for_angle(ranges, angle):
+    return ranges[(angle  + 360) % 360]
+
+def calc_vec(angle, dist):
+   angle = np.deg2rad(angle)
+   return dist * np.array([np.sin(angle), np.cos(angle)])
+
+def box_vector(ranges, theta_center):
+    p_center = calv_vec(theta_center, dist_for_angle(angle))
+
+def calc_goal(dist, angle):
+    goal = MoveBaseGoal()
+
+    goal.target_pose.header.frame_id = 'base_link'
+    goal.target_pose.header.stamp = rospy.Time.now()
+    goal.target_pose.pose = Pose(Point(dist, 0, 0),
+                                 Quaternion(*quaternion_from_euler(0,0,  np.deg2rad(angle))))
+    return goal
 
 class MoveBase():
     def img_callback(self, data):
@@ -37,65 +60,78 @@ class MoveBase():
             mask = cv2.inRange(hsv_img, lower, upper)
             im2, contours, hierarchy = cv2.findContours(mask,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
             sorted_by_perimiter = sorted(contours,key = lambda x: cv2.arcLength(x,False))
-
+        
+            self.has_box = False 
             if(len(sorted_by_perimiter)>0):
                 selected_contour = sorted_by_perimiter[-1] #largest contour
                 (x,y),radius = cv2.minEnclosingCircle(selected_contour)
-                center = (int(x),int(y))
-                radius = int(radius)
-                # print("radius", radius)
-                cv2.circle(hsv_img,center,radius,(0,255,0),2)
+		x, y, w, h = cv2.boundingRect(selected_contour)
+                cv2.rectangle(hsv_img,(x,y),(x+w, y+h),(0,255,0),2)
 
-                # M = cv2.moments(selected_contour)
-                # cX = int(M["m10"] / M["m00"])
-                # cY = int(M["m01"] / M["m00"])
+                self.angle = int(np.rad2deg(self.find_angle(x + (w/2), hsv_img.shape[1], self.OPENNING_ANGLE)))
 
-            cv2.imshow('title',hsv_img)
+                self.left_angle = int(np.rad2deg(self.find_angle(x, hsv_img.shape[1], self.OPENNING_ANGLE)))
+
+	        self.right_angle = int(np.rad2deg(self.find_angle(x + (w), hsv_img.shape[1], self.OPENNING_ANGLE)))
+
+                if w > 70 and (len(mask.nonzero()[1]) > 5000):
+                    self.has_box = True
+           
+            cv2.imshow('title', cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR))
             cv2.waitKey(100)
-            # print("image")
-            #def find_angle(self, box_x, total_width, openning_angle):
-            # print("center: ", center[0])
-            # print("shape:" , hsv_img.shape[1])
-            self.angle = int(np.rad2deg(self.find_angle(center[0], hsv_img.shape[1], self.OPENNING_ANGLE)))
-
-            # print("angle", self.angle)
-            if radius > 50:
-                self.has_box = True
-            else:
-                self.has_box = False
-            # if box_len > 100:
-            #     center = self.box_xcenter(box)
-            #     self.angle = self.find_angle(center, hsv_img.shape[1], self.OPENNING_ANGLE)
-            #     print("center,self.angle" , center, self.angle)
-            #     self.has_box = True
-            # else:
-            #     self.has_box = False
-
 
         except CvBridgeError as e:
             print(e)
 
+    def print_dists(self, left_box_average,
+                    left_out_box_average,
+                    right_box_average,
+                    right_out_box_average):
+        print("--------------------------------------")
+	print(left_out_box_average - left_box_average,
+              right_out_box_average - right_box_average)
+
+        print(left_out_box_average,
+              left_box_average,
+              right_box_average,
+              right_out_box_average)
+
+
     def scan_callback(self, data):
+        avg_calc_range = 10
+        rotate_to_space_epsilon = 10
         if self.has_box:
             # angle_deg = np.rad2deg(self.angle)
             # print("angle:" , self.angle)
-            range = (self.angle + 360) % 360
+            angle_range = (self.angle + 360) % 360
 
-            while data.ranges[range] == 0:
-                range = (range+1)%360
+            while data.ranges[angle_range] == 0:
+                angle_range = (angle_range+1)%360
+            
+            (left_box_average,
+             left_out_box_average,
+             right_box_average,
+             right_out_box_average) = [np.average([dist_for_angle(data.ranges, op(angle, i))
+                                                   for i in range(avg_calc_range)])
+                                       for angle, op in [(self.left_angle, sub),
+                                                         (self.left_angle, add),
+                                                         (self.right_angle, sub),
+                                                         (self.right_angle, add)]]
 
+            self.print_dists(left_box_average, left_out_box_average, right_box_average, right_out_box_average)
 
-            print("range", range)
-            print("distance:", data.ranges[range])
-
-
+            if ((left_out_box_average- left_box_average) > 0.1):
+                to_rotate = self.left_angle + rotate_to_space_epsilon
+                print("will rotate:", to_rotate)
+                self.move2(calc_goal(0, to_rotate))
+           
 
     def __init__(self):
         rospy.init_node('nav_test', anonymous=False)
         self.bridge = CvBridge()
         self.OPENNING_ANGLE = np.deg2rad(60)
         self.has_box = False
-
+        self.moving = False
         rospy.Subscriber("/usb_cam/image_raw", Image, self.img_callback)
         rospy.Subscriber('scan',LaserScan,self.scan_callback)
 
@@ -117,24 +153,7 @@ class MoveBase():
         rospy.loginfo("Starting navigation test")
 
         if not rospy.is_shutdown():
-            print("setting goal")
-            self.goal = MoveBaseGoal()
-
-            # x, y = input("give x,y")
-            x = 2.38
-            y = 0.42
-
-            # Use the map frame to define goal poses
-            self.goal.target_pose.header.frame_id = 'map'
-
-            # Set the time stamp to "now"
-            self.goal.target_pose.header.stamp = rospy.Time.now()
-
-            self.goal.target_pose.pose = Pose(Point(x, y, 0), Quaternion(0, 0, 0, 1))
-
-            # Start the robot moving toward the goal
-            self.move(self.goal)
-        rospy.spin()
+            rospy.spin()
 
     def done_cb(self, terminal_state, result):
         print("done_cb")
@@ -149,19 +168,17 @@ class MoveBase():
         # Send the goal pose to the MoveBaseAction server
         self.move_base.send_goal(goal , self.done_cb, self.active_cb, self.feedback_cb)
 
+    def move2(self, goal):
+        # Send the goal pose to the MoveBaseAction server
+        self.move_base.send_goal(goal)
+        finished = self.move_base.wait_for_result(rospy.Duration(30))
 
-        # Allow 1 minute to get there
-        # finished_within_time = self.move_base.wait_for_result(rospy.Duration(60))
-        #
-        # # If we don't get there in time, abort the goal
-        # if not finished_within_time:
-        #     self.move_base.cancel_goal()
-        #     rospy.loginfo("Timed out achieving goal")
-        # else:
-        #     # We made it!
-        #     state = self.move_base.get_state()
-        #     if state == GoalStatus.SUCCEEDED:
-        #         rospy.loginfo("Goal succeeded!")
+        if not finished:
+             print("not finished within time")
+        else:
+            state = self.move_base.get_state()
+            if state == GoalStatus.SUCCEEDED:
+                print("goal succeeded")
 
     def shutdown(self):
         rospy.loginfo("Stopping the robot...")
