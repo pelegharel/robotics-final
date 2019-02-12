@@ -33,14 +33,16 @@ class MoveBase():
             goal = MoveBaseGoal()
 
             x, y = input("give x,y")
-
+            x = 2.24
+            y = 0.28
+            W
             # Use the map frame to define goal poses
             goal.target_pose.header.frame_id = 'map'
 
             # Set the time stamp to "now"
             goal.target_pose.header.stamp = rospy.Time.now()
 
-            goal.target_pose.pose = Pose(Point(x, y, 0), Quaternion(0, 0, 0, 0))
+            goal.target_pose.pose = Pose(Point(x, y, 0), Quaternion(0, 0, 0, 1))
 
             # Start the robot moving toward the goal
             self.move(goal)
