@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(simple_navigation_goals)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-add_compile_options(-std=c++14)
+# add_compile_options(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -12,9 +12,6 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   move_base_msgs
   roscpp
-  cv_bridge
-  image_transport
-  sensor_msgs
 )
 
 ## System dependencies are found with CMake's conventions
@@ -109,7 +106,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES simple_navigation_goals
-   CATKIN_DEPENDS actionlib move_base_msgs roscpp cv_bridge
+#  CATKIN_DEPENDS actionlib move_base_msgs roscpp
 #  DEPENDS system_lib
 )
 
@@ -202,8 +199,3 @@ include_directories(
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
 
-find_package(OpenCV)
-
-add_executable(main src/main.cpp)
-target_link_libraries(main ${catkin_LIBRARIES} ${OpenCV_LIBRARIES})
-#add_dependencies(main simple_navigation_goals)
